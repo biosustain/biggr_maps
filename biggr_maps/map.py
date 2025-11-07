@@ -267,7 +267,7 @@ class AutoReaction(Reaction):
                 return n, side, d
             i += 1
     
-    def same_side_placement(self, desired_delta, delta, plus_minus, absolute_side=1):
+    def same_side_placement(self, desired_delta, delta, plus_minus, absolute_side=0):
         if desired_delta is not None:
             if not any(
                 abs(x - desired_delta) < delta for x in self._used_deltas[plus_minus]
@@ -277,6 +277,9 @@ class AutoReaction(Reaction):
                 return n, side, desired_delta
         n = 1
         side = bool(absolute_side) == bool(plus_minus)
+        if (self.angle % (2 * math.pi)) > math.pi:
+            side = not side
+        side = int(side)
         while True:
             d = (n * delta) if side else -(n * delta)
             if not any(abs(x - d) < delta for x in self._used_deltas[plus_minus]):
