@@ -51,6 +51,25 @@ class Map:
             segment.identifier = self._segment_counter
             self._segment_counter += 1
 
+    def fit_canvas(self, spacing: float = 100, expand_only=False):
+        if expand_only:
+            min_x = self.canvas[0]
+            min_y = self.canvas[1]
+            max_x = self.canvas[0] + self.canvas[2]
+            max_y = self.canvas[1] + self.canvas[3]
+        else:
+            min_x, max_x, min_y, max_y = 0, 0, 0, 0
+        for node in self.nodes.values():
+            min_x = min(min_x, node.x)
+            max_x = min(max_x, node.x)
+            min_y = min(min_y, node.y)
+            max_y = min(max_y, node.y)
+        min_x -= spacing
+        min_y -= spacing
+        max_x += spacing
+        max_y += spacing
+        self.canvas = (min_x, min_y, max_x - min_x, max_y - min_y)
+
     def to_escher(self):
         d_header = {
             "map_name": self.name,
@@ -215,8 +234,8 @@ class AutoReaction(Reaction):
         self,
         mid_marker: MidMarkerNode,
         angle: float,
-        unit: float=50,
-        text_y_correction: float=8,
+        unit: float = 50,
+        text_y_correction: float = 8,
         **kwargs
     ):
         self.angle = angle
@@ -266,7 +285,7 @@ class AutoReaction(Reaction):
             if not any(abs(x - d) < delta for x in self._used_deltas[plus_minus]):
                 return n, side, d
             i += 1
-    
+
     def same_side_placement(self, desired_delta, delta, plus_minus, absolute_side=0):
         if desired_delta is not None:
             if not any(
@@ -318,9 +337,7 @@ class AutoReaction(Reaction):
             desired_delta = 0
 
         size = scale
-        n, side, angle_delta = placement_f(self,
-            desired_delta, delta, plus_minus
-        )
+        n, side, angle_delta = placement_f(self, desired_delta, delta, plus_minus)
         angle = self.angle + angle_delta
         self._used_deltas[plus_minus].append(angle_delta)
         bend_curve = abs(angle_delta) > 0.001
