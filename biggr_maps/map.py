@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 
 class Map:
@@ -73,7 +73,7 @@ class Map:
 
 
 class Node:
-    def __init__(self, x: float, y: float):
+    def __init__(self, x: Optional[float] = None, y: Optional[float] = None):
         self.identifier = None
         self.node_type = None
         self.x = x
@@ -88,13 +88,13 @@ class Node:
 class MetaboliteNode(Node):
     def __init__(
         self,
-        x: float,
-        y: float,
         bigg_id: str,
         name: str,
-        label_x: float,
-        label_y: float,
-        node_is_primary: bool,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        label_x: Optional[float] = None,
+        label_y: Optional[float] = None,
+        node_is_primary: bool = False,
     ):
         super().__init__(x, y)
         self.node_type = "metabolite"
@@ -114,7 +114,7 @@ class MultiMarkerNode(Node):
 class MidMarkerNode(Node):
     def __init__(self, x: float, y: float):
         super().__init__(x, y)
-        self.node_type = "multimarker"
+        self.node_type = "midmarker"
 
 
 class Segment:
@@ -151,6 +151,8 @@ class Reaction:
         plus_multi_marker: Optional[MultiMarkerNode],
         minus_multi_marker: Optional[MultiMarkerNode],
         reversibility: bool = True,
+        gene_reaction_rule: Optional[str] = None,
+        genes: Optional[List[Dict[str, str]]] = None,
     ):
         self.identifier = None
         self.name = name
@@ -162,6 +164,8 @@ class Reaction:
         self.multi_markers = (minus_multi_marker, plus_multi_marker)
         self.metabolites = []
         self.segments = []
+        self.gene_reaction_rule = gene_reaction_rule
+        self.genes = genes
         self._add_multi_marker_segments()
 
     def _add_multi_marker_segments(self):
@@ -199,11 +203,22 @@ class Reaction:
                 segment.identifier: segment.to_escher() for segment in self.segments
             },
         }
+        if self.gene_reaction_rule is not None:
+            d["gene_reaction_rule"] = self.gene_reaction_rule
+        if self.genes is not None:
+            d["genes"] = self.genes
         return d
 
 
 class AutoReaction(Reaction):
-    def __init__(self, mid_marker: MidMarkerNode, angle: float, unit: float, text_y_correction=8, **kwargs):
+    def __init__(
+        self,
+        mid_marker: MidMarkerNode,
+        angle: float,
+        unit: float,
+        text_y_correction=8,
+        **kwargs
+    ):
         self.angle = angle
         self.unit = unit
         text_offset = 16
@@ -220,7 +235,11 @@ class AutoReaction(Reaction):
         )
 
         label_x = mid_marker.x + abs(text_offset * math.cos(self.angle - 0.5 * math.pi))
-        label_y = mid_marker.y + text_offset * math.sin(self.angle - 0.5 * math.pi) + text_y_correction
+        label_y = (
+            mid_marker.y
+            + text_offset * math.sin(self.angle - 0.5 * math.pi)
+            + text_y_correction
+        )
 
         super().__init__(
             mid_marker=mid_marker,
@@ -230,17 +249,19 @@ class AutoReaction(Reaction):
             plus_multi_marker=multi2,
             **kwargs
         )
-    
+
     def _determine_n_and_side(self, desired_delta, delta, plus_minus):
         if desired_delta is not None:
-            if not any(abs(x - desired_delta) < delta for x in self._used_deltas[plus_minus]):
+            if not any(
+                abs(x - desired_delta) < delta for x in self._used_deltas[plus_minus]
+            ):
                 side = desired_delta >= 0
-                n = abs(desired_delta)/delta
+                n = abs(desired_delta) / delta
                 return n, side, desired_delta
         i = 1
         while True:
-            n = 1 + (i-1)//2
-            side = (i-1)%2
+            n = 1 + (i - 1) // 2
+            side = (i - 1) % 2
             d = (n * delta) if side else -(n * delta)
             if not any(abs(x - d) < delta for x in self._used_deltas[plus_minus]):
                 return n, side, d
@@ -248,7 +269,7 @@ class AutoReaction(Reaction):
 
     def add_metabolite(
         self,
-        node_info,
+        node,
         coefficient: Union[float, int],
         scale: float = 3.0,
         delta=math.pi * 0.15,
@@ -256,7 +277,7 @@ class AutoReaction(Reaction):
         b1_scale=0.3,
         b2_scale=0.8,
         text_y_correction=6,
-        text_offset_f=lambda x: 20 + x*12,
+        text_offset_f=lambda x: 20 + x * 12,
     ):
         ref_node = self.mid_marker
         plus_minus = coefficient > 0
@@ -264,21 +285,23 @@ class AutoReaction(Reaction):
             ref_node = self.multi_markers[plus_minus]
 
         desired_delta = None
-        if "x" in node_info and "y" in node_info:
-            dy = node_info["y"] - ref_node.y
-            dx = node_info["x"] - ref_node.x
+        if node.x is not None and node.y is not None:
+            dy = node.y - ref_node.y
+            dx = node.x - ref_node.x
             desired_delta = math.atan2(dy, dx) - self.angle - (1 - plus_minus) * math.pi
 
-        is_primary = node_info["node_is_primary"]
+        is_primary = node.node_is_primary
         if desired_delta is None and is_primary:
             desired_delta = 0
-        
+
         size = scale
-        n, side, angle_delta = self._determine_n_and_side(desired_delta, delta, plus_minus)
+        n, side, angle_delta = self._determine_n_and_side(
+            desired_delta, delta, plus_minus
+        )
         angle = self.angle + angle_delta
         self._used_deltas[plus_minus].append(angle_delta)
         bend_curve = abs(angle_delta) > 0.001
-        if "x" not in node_info or "y" not in node_info:
+        if node.x is None or node.y is None:
             if not is_primary:
                 size = no_primary_length_f(n) * scale
             x = ref_node.x + self.unit * size * math.cos(
@@ -287,19 +310,38 @@ class AutoReaction(Reaction):
             y = ref_node.y + self.unit * size * math.sin(
                 angle + (1 - plus_minus) * math.pi
             )
-            node_info["x"] = x
-            node_info["y"] = y
+            node.x = x
+            node.y = y
         else:
-            size = math.sqrt((node_info["x"] - ref_node.x)**2 + (node_info["y"] - ref_node.y)**2)/self.unit
+            size = (
+                math.sqrt((node.x - ref_node.x) ** 2 + (node.y - ref_node.y) ** 2)
+                / self.unit
+            )
 
-        if "label_x" not in node_info or "label_y" not in node_info:
-            x_positive = -min(0, math.cos(self.angle + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi))
-            label_x = node_info["x"] + text_offset_f(x_positive * len(node_info["bigg_id"])) * math.cos(self.angle + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi)
-            label_y = node_info["y"] + text_offset_f(x_positive * len(node_info["bigg_id"])) * math.sin(self.angle + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi) + text_y_correction
-            node_info["label_x"] = label_x
-            node_info["label_y"] = label_y
+        if node.label_x is None or node.label_y is None:
+            x_positive = -min(
+                0,
+                math.cos(
+                    self.angle
+                    + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
+                ),
+            )
+            label_x = node.x + text_offset_f(x_positive * len(node.bigg_id)) * math.cos(
+                self.angle
+                + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
+            )
+            label_y = (
+                node.y
+                + text_offset_f(x_positive * len(node.bigg_id))
+                * math.sin(
+                    self.angle
+                    + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
+                )
+                + text_y_correction
+            )
+            node.label_x = label_x
+            node.label_y = label_y
 
-        node = MetaboliteNode(**node_info)
         self.metabolites.append((coefficient, node))
 
         b1 = None
@@ -308,12 +350,12 @@ class AutoReaction(Reaction):
             b2 = (
                 node.x
                 + self.unit
-                * (1-b2_scale)
+                * (1 - b2_scale)
                 * size
                 * math.cos(angle + (2 - plus_minus) * math.pi),
                 node.y
                 + self.unit
-                * (1-b2_scale)
+                * (1 - b2_scale)
                 * size
                 * math.sin(angle + (2 - plus_minus) * math.pi),
             )
