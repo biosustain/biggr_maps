@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import math
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -228,6 +229,24 @@ class Reaction:
             d["genes"] = self.genes
         return d
 
+def cubic_bezier_bt(t, b0, b1, b2, b3):
+    bt = ((1-t)**3) * b0 + 3*t*((1-t)**2)*b1 + 3*(t**2)*(1-t)*b2 + (t**3)*b3
+    return bt
+
+def non_primary_scaling(x):
+    return (1 - (min(x - 1, 5) / 5)) * 0.3 + 0.5
+def default_text_offset(x):
+    return 20 + x * 12
+@dataclass
+class PlacementOptions:
+    delta=math.pi * 0.15
+    no_primary_length_f=None
+    scale=3.0
+    b1_scale=0.3
+    b2_scale=0.8
+    text_y_correction=6
+    text_offset_f=None
+    placement_f=None
 
 class AutoReaction(Reaction):
     def __init__(
@@ -269,58 +288,93 @@ class AutoReaction(Reaction):
             **kwargs
         )
 
-    def alternating_side_placement(self, desired_delta, delta, plus_minus):
-        if desired_delta is not None:
-            if not any(
-                abs(x - desired_delta) < delta for x in self._used_deltas[plus_minus]
-            ):
-                side = desired_delta >= 0
-                n = abs(desired_delta) / delta
-                return n, side, desired_delta
-        i = 1
-        while True:
-            n = 1 + (i - 1) // 2
-            side = (i - 1) % 2
-            d = (n * delta) if side else -(n * delta)
-            if not any(abs(x - d) < delta for x in self._used_deltas[plus_minus]):
-                return n, side, d
-            i += 1
+    def alternating_side_placement(self, i, delta, plus_minus):
+        n = 1 + (i - 1) // 2
+        side = (i - 1) % 2
+        d = (n * delta) if side else -(n * delta)
+        return n, side, d
 
-    def same_side_placement(self, desired_delta, delta, plus_minus, absolute_side=0):
-        if desired_delta is not None:
-            if not any(
-                abs(x - desired_delta) < delta for x in self._used_deltas[plus_minus]
-            ):
-                side = desired_delta >= 0
-                n = abs(desired_delta) / delta
-                return n, side, desired_delta
-        n = 1
+    def same_side_placement(self, n, delta, plus_minus, absolute_side=0):
         side = bool(absolute_side) == bool(plus_minus)
         if (self.angle % (2 * math.pi)) > math.pi:
             side = not side
         side = int(side)
-        while True:
-            d = (n * delta) if side else -(n * delta)
-            if not any(abs(x - d) < delta for x in self._used_deltas[plus_minus]):
-                return n, side, d
-            n += 1
+
+        d = (n * delta) if side else -(n * delta)
+        return n, side, d
+
+    def calculate_placement(self, ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts):
+        size = placement_opts.scale
+        angle = self.angle + angle_delta
+
+        x, y = node.x, node.y
+        if x is None or y is None:
+            if not node.node_is_primary:
+                size = placement_opts.no_primary_length_f(n) * placement_opts.scale
+            x = ref_node.x + self.unit * size * math.cos(
+                angle + (1 - plus_minus) * math.pi
+            )
+            y = ref_node.y + self.unit * size * math.sin(
+                angle + (1 - plus_minus) * math.pi
+            )
+        else:
+            size = (
+                math.sqrt((x - ref_node.x) ** 2 + (y - ref_node.y) ** 2)
+                / self.unit
+            )
+
+        if b1_b2 is not None:
+            b1, b2 = b1_b2
+        else:
+            b2 = (
+                x
+                + self.unit
+                * (1 - placement_opts.b2_scale)
+                * size
+                * math.cos(angle + (2 - plus_minus) * math.pi),
+                y
+                + self.unit
+                * (1 - placement_opts.b2_scale)
+                * size
+                * math.sin(angle + (2 - plus_minus) * math.pi),
+            )
+            b1 = (
+                ref_node.x
+                + self.unit
+                * placement_opts.b1_scale
+                * size
+                * math.cos(self.angle + (1 - plus_minus) * math.pi),
+                ref_node.y
+                + self.unit
+                * placement_opts.b1_scale
+                * size
+                * math.sin(self.angle + (1 - plus_minus) * math.pi),
+            )
+        t = max(1.5 / size, 1.0)
+        bt = (cubic_bezier_bt(t, ref_node.x, b1[0], b2[0], x), cubic_bezier_bt(t, ref_node.y, b1[1], b2[1], y))
+        effective_angle_delta = math.atan2(bt[1] - ref_node.y, bt[0] - ref_node.x) - self.angle
+        if not plus_minus:
+            effective_angle_delta = effective_angle_delta + math.pi
+        effective_angle_delta = math.remainder(effective_angle_delta, math.pi * 2)
+
+        return x, y, size, b1, b2, effective_angle_delta
 
     def add_metabolite(
         self,
         node,
         coefficient: Union[float, int],
-        scale: float = 3.0,
-        delta=math.pi * 0.15,
-        no_primary_length_f=lambda x: (1 - (min(x - 1, 5) / 5)) * 0.3 + 0.5,
-        b1_scale=0.3,
-        b2_scale=0.8,
-        text_y_correction=6,
-        text_offset_f=lambda x: 20 + x * 12,
         b1_b2: Optional[Tuple[Optional[float], Optional[float]]] = None,
-        placement_f=None,
+        placement_opts=None,
     ):
-        if placement_f is None:
-            placement_f = self.__class__.alternating_side_placement
+        if placement_opts is None:
+            placement_opts = PlacementOptions()
+        if placement_opts.placement_f is None:
+            placement_opts.placement_f = self.__class__.alternating_side_placement
+        if placement_opts.no_primary_length_f is None:
+            placement_opts.no_primary_length_f = non_primary_scaling
+        if placement_opts.text_offset_f is None:
+            placement_opts.text_offset_f = default_text_offset
+        
         ref_node = self.mid_marker
         plus_minus = coefficient > 0
         if self.multi_markers[plus_minus] is not None:
@@ -335,27 +389,27 @@ class AutoReaction(Reaction):
         is_primary = node.node_is_primary
         if desired_delta is None and is_primary:
             desired_delta = 0
-
-        size = scale
-        n, side, angle_delta = placement_f(self, desired_delta, delta, plus_minus)
-        angle = self.angle + angle_delta
-        self._used_deltas[plus_minus].append(angle_delta)
-        if node.x is None or node.y is None:
-            if not is_primary:
-                size = no_primary_length_f(n) * scale
-            x = ref_node.x + self.unit * size * math.cos(
-                angle + (1 - plus_minus) * math.pi
+        
+        if node.x is not None and node.y is not None and b1_b2 is not None:
+            x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
+                ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
             )
-            y = ref_node.y + self.unit * size * math.sin(
-                angle + (1 - plus_minus) * math.pi
-            )
-            node.x = x
-            node.y = y
+            side = effective_angle_delta >= 0
+            n = abs(effective_angle_delta) / placement_opts.delta
         else:
-            size = (
-                math.sqrt((node.x - ref_node.x) ** 2 + (node.y - ref_node.y) ** 2)
-                / self.unit
-            )
+            for i in range(10):
+                n, side, angle_delta = placement_opts.placement_f(self, i, placement_opts.delta, plus_minus)
+                x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
+                    ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
+                )
+                if not any(
+                    abs(d - effective_angle_delta) < (0.5 * placement_opts.delta) for d in self._used_deltas[plus_minus]
+                ):
+                    break
+
+        self._used_deltas[plus_minus].append(effective_angle_delta)
+        node.x = x
+        node.y = y
 
         if node.label_x is None or node.label_y is None:
             x_positive = -min(
@@ -365,51 +419,23 @@ class AutoReaction(Reaction):
                     + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
                 ),
             )
-            label_x = node.x + text_offset_f(x_positive * len(node.bigg_id)) * math.cos(
+            label_x = node.x + placement_opts.text_offset_f(x_positive * len(node.bigg_id)) * math.cos(
                 self.angle
                 + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
             )
             label_y = (
                 node.y
-                + text_offset_f(x_positive * len(node.bigg_id))
+                + placement_opts.text_offset_f(x_positive * len(node.bigg_id))
                 * math.sin(
                     self.angle
                     + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
                 )
-                + text_y_correction
+                + placement_opts.text_y_correction
             )
             node.label_x = label_x
             node.label_y = label_y
 
         self.metabolites.append((coefficient, node))
-
-        if b1_b2 is not None:
-            b1, b2 = b1_b2
-        else:
-            b2 = (
-                node.x
-                + self.unit
-                * (1 - b2_scale)
-                * size
-                * math.cos(angle + (2 - plus_minus) * math.pi),
-                node.y
-                + self.unit
-                * (1 - b2_scale)
-                * size
-                * math.sin(angle + (2 - plus_minus) * math.pi),
-            )
-            b1 = (
-                ref_node.x
-                + self.unit
-                * b1_scale
-                * size
-                * math.cos(self.angle + (1 - plus_minus) * math.pi),
-                ref_node.y
-                + self.unit
-                * b1_scale
-                * size
-                * math.sin(self.angle + (1 - plus_minus) * math.pi),
-            )
 
         if plus_minus:
             segment = Segment(ref_node, node, b1=b1, b2=b2)
