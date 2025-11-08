@@ -339,8 +339,6 @@ class AutoReaction(Reaction):
         size = scale
         n, side, angle_delta = placement_f(self, desired_delta, delta, plus_minus)
         angle = self.angle + angle_delta
-        self._used_deltas[plus_minus].append(angle_delta)
-        bend_curve = abs(angle_delta) > 0.001
         if node.x is None or node.y is None:
             if not is_primary:
                 size = no_primary_length_f(n) * scale
@@ -386,7 +384,7 @@ class AutoReaction(Reaction):
 
         if b1_b2 is not None:
             b1, b2 = b1_b2
-        elif bend_curve:
+        else:
             b2 = (
                 node.x
                 + self.unit
@@ -411,6 +409,18 @@ class AutoReaction(Reaction):
                 * size
                 * math.sin(self.angle + (1 - plus_minus) * math.pi),
             )
+        
+        effective_angle_delta = angle_delta
+        if b1 is not None or b2 is not None:
+            b1_e = b1 if b1 is not None else (ref_node.x, ref_node.y)
+            b2_e = b2 if b2 is not None else (node.x, node.y)
+            t = self.unit
+            bt = (
+                ((1-t)**3) * ref_node.x + 2*t*((1-t)**2) * b1_e[0] + 3 * (t**2) * (1-t) * b2_e[0] + (t**3) * node.x,
+                ((1-t)**3) * ref_node.y + 2*t*((1-t)**2) * b1_e[1] + 3 * (t**2) * (1-t) * b2_e[1] + (t**3) * node.y
+            )
+            effective_angle_delta = math.atan2(bt[1] - ref_node.y, bt[0] - ref_node.x) - self.angle
+        self._used_deltas[plus_minus].append(effective_angle_delta)
 
         if plus_minus:
             segment = Segment(ref_node, node, b1=b1, b2=b2)
