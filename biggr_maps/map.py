@@ -229,24 +229,53 @@ class Reaction:
             d["genes"] = self.genes
         return d
 
+
 def cubic_bezier_bt(t, b0, b1, b2, b3):
-    bt = ((1-t)**3) * b0 + 3*t*((1-t)**2)*b1 + 3*(t**2)*(1-t)*b2 + (t**3)*b3
+    bt = (
+        ((1 - t) ** 3) * b0
+        + 3 * t * ((1 - t) ** 2) * b1
+        + 3 * (t**2) * (1 - t) * b2
+        + (t**3) * b3
+    )
     return bt
+
 
 def non_primary_scaling(x):
     return (1 - (min(x - 1, 5) / 5)) * 0.3 + 0.5
+
+
 def default_text_offset(x):
     return 20 + x * 12
-@dataclass
+
+
 class PlacementOptions:
-    delta=math.pi * 0.15
-    no_primary_length_f=None
-    scale=3.0
-    b1_scale=0.3
-    b2_scale=0.8
-    text_y_correction=6
-    text_offset_f=None
-    placement_f=None
+    def __init__(
+        self,
+        delta=math.pi * 0.15,
+        no_primary_length_f=None,
+        scale=3.0,
+        b1_scale=0.3,
+        b2_scale=0.8,
+        text_y_correction=6,
+        text_offset_f=None,
+        placement_f=None,
+    ):
+        self.delta = delta
+        self.scale = scale
+        self.b1_scale = b1_scale
+        self.b2_scale = b2_scale
+        self.text_y_correction = text_y_correction
+
+        self.placement_f = placement_f
+        if no_primary_length_f is None:
+            self.no_primary_length_f = non_primary_scaling
+        else:
+            self.no_primary_length_f = no_primary_length_f
+        if text_offset_f is None:
+            self.text_offset_f = default_text_offset
+        else:
+            self.text_offset_f = text_offset_f
+
 
 class AutoReaction(Reaction):
     def __init__(
@@ -303,7 +332,9 @@ class AutoReaction(Reaction):
         d = (n * delta) if side else -(n * delta)
         return n, side, d
 
-    def calculate_placement(self, ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts):
+    def calculate_placement(
+        self, ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
+    ):
         size = placement_opts.scale
         angle = self.angle + angle_delta
 
@@ -318,10 +349,7 @@ class AutoReaction(Reaction):
                 angle + (1 - plus_minus) * math.pi
             )
         else:
-            size = (
-                math.sqrt((x - ref_node.x) ** 2 + (y - ref_node.y) ** 2)
-                / self.unit
-            )
+            size = math.sqrt((x - ref_node.x) ** 2 + (y - ref_node.y) ** 2) / self.unit
 
         if b1_b2 is not None:
             b1, b2 = b1_b2
@@ -351,8 +379,13 @@ class AutoReaction(Reaction):
                 * math.sin(self.angle + (1 - plus_minus) * math.pi),
             )
         t = max(1.5 / size, 1.0)
-        bt = (cubic_bezier_bt(t, ref_node.x, b1[0], b2[0], x), cubic_bezier_bt(t, ref_node.y, b1[1], b2[1], y))
-        effective_angle_delta = math.atan2(bt[1] - ref_node.y, bt[0] - ref_node.x) - self.angle
+        bt = (
+            cubic_bezier_bt(t, ref_node.x, b1[0], b2[0], x),
+            cubic_bezier_bt(t, ref_node.y, b1[1], b2[1], y),
+        )
+        effective_angle_delta = (
+            math.atan2(bt[1] - ref_node.y, bt[0] - ref_node.x) - self.angle
+        )
         if not plus_minus:
             effective_angle_delta = effective_angle_delta + math.pi
         effective_angle_delta = math.remainder(effective_angle_delta, math.pi * 2)
@@ -370,11 +403,6 @@ class AutoReaction(Reaction):
             placement_opts = PlacementOptions()
         if placement_opts.placement_f is None:
             placement_opts.placement_f = self.__class__.alternating_side_placement
-        if placement_opts.no_primary_length_f is None:
-            placement_opts.no_primary_length_f = non_primary_scaling
-        if placement_opts.text_offset_f is None:
-            placement_opts.text_offset_f = default_text_offset
-        
         ref_node = self.mid_marker
         plus_minus = coefficient > 0
         if self.multi_markers[plus_minus] is not None:
@@ -389,7 +417,7 @@ class AutoReaction(Reaction):
         is_primary = node.node_is_primary
         if desired_delta is None and is_primary:
             desired_delta = 0
-        
+
         if node.x is not None and node.y is not None and b1_b2 is not None:
             x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
                 ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
@@ -398,12 +426,15 @@ class AutoReaction(Reaction):
             n = abs(effective_angle_delta) / placement_opts.delta
         else:
             for i in range(10):
-                n, side, angle_delta = placement_opts.placement_f(self, i, placement_opts.delta, plus_minus)
+                n, side, angle_delta = placement_opts.placement_f(
+                    self, i, placement_opts.delta, plus_minus
+                )
                 x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
                     ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
                 )
                 if not any(
-                    abs(d - effective_angle_delta) < (0.5 * placement_opts.delta) for d in self._used_deltas[plus_minus]
+                    abs(d - effective_angle_delta) < (0.5 * placement_opts.delta)
+                    for d in self._used_deltas[plus_minus]
                 ):
                     break
 
@@ -419,7 +450,9 @@ class AutoReaction(Reaction):
                     + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
                 ),
             )
-            label_x = node.x + placement_opts.text_offset_f(x_positive * len(node.bigg_id)) * math.cos(
+            label_x = node.x + placement_opts.text_offset_f(
+                x_positive * len(node.bigg_id)
+            ) * math.cos(
                 self.angle
                 + (1 if bool(side) == bool(plus_minus) else -1) * 0.5 * math.pi
             )
