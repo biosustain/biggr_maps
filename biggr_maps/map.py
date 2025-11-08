@@ -361,12 +361,12 @@ class AutoReaction(Reaction):
                 + self.unit
                 * (1 - placement_opts.b2_scale)
                 * size
-                * math.cos(angle + (2 - plus_minus) * math.pi),
+                * math.cos(self.angle + (2 - plus_minus) * math.pi),
                 y
                 + self.unit
                 * (1 - placement_opts.b2_scale)
                 * size
-                * math.sin(angle + (2 - plus_minus) * math.pi),
+                * math.sin(self.angle + (2 - plus_minus) * math.pi),
             )
             b1 = (
                 ref_node.x
@@ -434,7 +434,7 @@ class AutoReaction(Reaction):
                 x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
                     ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
                 )
-                print(f"{node.bigg_id}: ({i}): (n:{n}, side:{side}, angle_delta:{angle_delta}) -> (x:{x}, y:{y}, size:{size}, b1:{b1}, b2:{b2}, effective_angle_delta:{effective_angle_delta})")
+                # print(f"{node.bigg_id}: ({i}): (n:{n}, side:{side}, angle_delta:{angle_delta}) -> (x:{x}, y:{y}, size:{size}, b1:{b1}, b2:{b2}, effective_angle_delta:{effective_angle_delta})")
                 if not any(
                     abs(d - effective_angle_delta) < (placement_opts.delta_tolerance * placement_opts.delta)
                     for d in self._used_deltas[plus_minus]
