@@ -286,6 +286,7 @@ class PlacementOptions:
 class AutoReaction(Reaction):
     def __init__(
         self,
+        bigg_id: str,
         mid_marker: MidMarkerNode,
         angle: float,
         unit: float = 50,
@@ -307,7 +308,7 @@ class AutoReaction(Reaction):
             mid_marker.y + self.unit * math.sin(self.angle),
         )
 
-        label_x = mid_marker.x + abs(text_offset * math.cos(self.angle - 0.5 * math.pi))
+        label_x = mid_marker.x + text_offset * abs(math.cos(self.angle - 0.5 * math.pi))
         label_y = (
             mid_marker.y
             + text_offset * math.sin(self.angle - 0.5 * math.pi)
@@ -315,6 +316,7 @@ class AutoReaction(Reaction):
         )
 
         super().__init__(
+            bigg_id=bigg_id,
             mid_marker=mid_marker,
             label_x=label_x,
             label_y=label_y,
