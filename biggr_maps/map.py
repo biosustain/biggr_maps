@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import math
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class Map:
@@ -24,6 +24,7 @@ class Map:
         self.schema = schema
         self.reactions = {}
         self.nodes = {}
+        self.segments = {}
         self.text_labels = {}
         self.canvas = canvas
         self._node_counter = 0
@@ -33,12 +34,24 @@ class Map:
     def add_node(self, node: Optional["Node"]):
         if node is None or node.identifier is not None:
             return
+        while self._node_counter in self.nodes:
+            self._node_counter += 1
         node.identifier = self._node_counter
         self.nodes[node.identifier] = node
         self._node_counter += 1
+    
+    def add_segment(self, segment: "Segment"):
+        while self._segment_counter in self.segments:
+            self._segment_counter += 1
+        segment.identifier = self._segment_counter
+        self.segments[segment.identifier] = segment
+        self._segment_counter += 1
 
     def add_reaction(self, reaction: "Reaction"):
+        while self._reaction_counter in self.reactions:
+            self._reaction_counter += 1
         reaction.identifier = self._reaction_counter
+        reaction._map = self
         self.reactions[reaction.identifier] = reaction
         self._reaction_counter += 1
 
@@ -49,8 +62,7 @@ class Map:
         self.add_node(reaction.multi_markers[1])
 
         for segment in reaction.segments:
-            segment.identifier = self._segment_counter
-            self._segment_counter += 1
+            self.add_segment(segment)
 
     def fit_canvas(self, spacing: float = 100, expand_only=False):
         if expand_only:
@@ -149,6 +161,7 @@ class Segment:
         b1: Optional[Tuple[float, float]] = None,
         b2: Optional[Tuple[float, float]] = None,
     ):
+        self.identifier = None
         self.from_node = from_node
         self.to_node = to_node
         self.b1 = b1
@@ -163,6 +176,17 @@ class Segment:
         }
         return d
 
+def node_from_dict(d: Dict[str, Any]) -> Node:
+    node_class = Node
+    if d["node_type"] == "metabolite":
+        node_class = MetaboliteNode
+    elif d["node_type"] == "midmarker":
+        node_class = MidMarkerNode
+    elif d["node_type"] == "multimarker":
+        node_class = MultiMarkerNode
+    return node_class(
+        **{k: v for k, v in d.items() if k != "node_type"}
+    )
 
 class Reaction:
     def __init__(
@@ -179,6 +203,7 @@ class Reaction:
         genes: Optional[List[Dict[str, str]]] = None,
     ):
         self.identifier = None
+        self._map: Optional[Map] = None
         self.name = name
         self.bigg_id = bigg_id
         self.label_x = label_x
@@ -192,14 +217,21 @@ class Reaction:
         self.genes = genes
         self._add_multi_marker_segments()
 
+    def add_segment(self, segment: "Segment"):
+        if self._map is not None:
+            self._map.add_segment(segment)
+        self.segments.append(segment)
+    
     def _add_multi_marker_segments(self):
         if self.multi_markers[0] is not None:
-            self.segments.append(Segment(self.multi_markers[0], self.mid_marker))
+            self.add_segment(Segment(self.multi_markers[0], self.mid_marker))
         if self.multi_markers[1] is not None:
-            self.segments.append(Segment(self.mid_marker, self.multi_markers[1]))
+            self.add_segment(Segment(self.mid_marker, self.multi_markers[1]))
 
     def add_metabolite(self, node: MetaboliteNode, coefficient: Union[float, int]):
         self.metabolites.append((coefficient, node))
+        if self._map is not None:
+            self._map.add_node(node)
 
         ref_node = self.mid_marker
         plus_minus = coefficient > 0
@@ -210,7 +242,7 @@ class Reaction:
             segment = Segment(ref_node, node)
         else:
             segment = Segment(node, ref_node)
-        self.segments.append(segment)
+        self.add_segment(segment)
 
     def to_escher(self):
         d = {
@@ -291,6 +323,10 @@ class AutoReaction(Reaction):
         angle: float,
         unit: float = 50,
         text_y_correction: float = 8,
+        label_x: Optional[float] = None,
+        label_y: Optional[float] = None,
+        minus_multi_marker: Optional[Union[MultiMarkerNode, MidMarkerNode]] = None,
+        plus_multi_marker: Optional[Union[MultiMarkerNode, MidMarkerNode]] = None,
         **kwargs
     ):
         self.angle = angle
@@ -299,29 +335,36 @@ class AutoReaction(Reaction):
 
         self._used_deltas = ([], [])
 
-        multi1 = MultiMarkerNode(
-            mid_marker.x + self.unit * math.cos(self.angle + math.pi),
-            mid_marker.y + self.unit * math.sin(self.angle + math.pi),
-        )
-        multi2 = MultiMarkerNode(
-            mid_marker.x + self.unit * math.cos(self.angle),
-            mid_marker.y + self.unit * math.sin(self.angle),
-        )
+        if minus_multi_marker is None:
+            minus_multi_marker = MultiMarkerNode(
+                mid_marker.x + self.unit * math.cos(self.angle + math.pi),
+                mid_marker.y + self.unit * math.sin(self.angle + math.pi),
+            )
+        if minus_multi_marker is mid_marker:
+            minus_multi_marker = None
+        if plus_multi_marker is None:
+            plus_multi_marker = MultiMarkerNode(
+                mid_marker.x + self.unit * math.cos(self.angle),
+                mid_marker.y + self.unit * math.sin(self.angle),
+            )
+        if plus_multi_marker is mid_marker:
+            plus_multi_marker = None
 
-        label_x = mid_marker.x + text_offset * abs(math.cos(self.angle - 0.5 * math.pi))
-        label_y = (
-            mid_marker.y
-            + text_offset * math.sin(self.angle - 0.5 * math.pi)
-            + text_y_correction
-        )
+        if label_x is None or label_y is None:
+            label_x = mid_marker.x + text_offset * abs(math.cos(self.angle - 0.5 * math.pi))
+            label_y = (
+                mid_marker.y
+                + text_offset * math.sin(self.angle - 0.5 * math.pi)
+                + text_y_correction
+            )
 
         super().__init__(
             bigg_id=bigg_id,
             mid_marker=mid_marker,
             label_x=label_x,
             label_y=label_y,
-            minus_multi_marker=multi1,
-            plus_multi_marker=multi2,
+            minus_multi_marker=minus_multi_marker,
+            plus_multi_marker=plus_multi_marker,
             **kwargs
         )
 
@@ -403,7 +446,7 @@ class AutoReaction(Reaction):
 
     def add_metabolite(
         self,
-        node,
+        node: MetaboliteNode,
         coefficient: Union[float, int],
         b1_b2: Optional[Tuple[Optional[float], Optional[float]]] = None,
         placement_opts=None,
@@ -417,19 +460,9 @@ class AutoReaction(Reaction):
         if self.multi_markers[plus_minus] is not None:
             ref_node = self.multi_markers[plus_minus]
 
-        desired_delta = None
-        if node.x is not None and node.y is not None:
-            dy = node.y - ref_node.y
-            dx = node.x - ref_node.x
-            desired_delta = math.atan2(dy, dx) - self.angle - (1 - plus_minus) * math.pi
-
-        is_primary = node.node_is_primary
-        if desired_delta is None and is_primary:
-            desired_delta = 0
-
         if node.x is not None and node.y is not None and b1_b2 is not None:
             x, y, size, b1, b2, effective_angle_delta = self.calculate_placement(
-                ref_node, node, plus_minus, angle_delta, n, b1_b2, placement_opts
+                ref_node, node, plus_minus, 0, 0, b1_b2, placement_opts
             )
             side = effective_angle_delta >= 0
             n = abs(effective_angle_delta) / placement_opts.delta
@@ -479,9 +512,19 @@ class AutoReaction(Reaction):
             node.label_y = label_y
 
         self.metabolites.append((coefficient, node))
+        if self._map is not None:
+            self._map.add_node(node)
 
         if plus_minus:
             segment = Segment(ref_node, node, b1=b1, b2=b2)
         else:
             segment = Segment(node, ref_node, b1=b2, b2=b1)
-        self.segments.append(segment)
+        self.add_segment(segment)
+
+class AutoReactionWithOptionalMetabolites(AutoReaction):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.optional_metabolites = {}
+    
+    def add_optional_metabolite(self, node: MetaboliteNode, coefficient: float, b1_b2: Optional[Tuple[Optional[float], Optional[float]]]):
+        self.optional_metabolites[node.bigg_id] = {"coefficient": coefficient, "node": node, "b1_b2": b1_b2}
