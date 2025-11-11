@@ -4,7 +4,7 @@ from typing import TextIO
 from biggr_maps import map
 
 
-def load_as_template(fp: TextIO, primary_only: bool = True) -> map.Map:
+def load_as_template(fp: TextIO) -> map.Map:
     data = json.load(fp)
     m = map.Map(
         name=data[0]["map_name"],
@@ -90,9 +90,4 @@ def load_as_template(fp: TextIO, primary_only: bool = True) -> map.Map:
             else:
                 reaction.add_optional_metabolite(node=node, coefficient=coefficient, b1_b2=b1_b2)
         reactions.append(reaction)
-
-    for reaction in reactions:
-        m.add_reaction(reaction)
-        for optional_met_info in reaction.optional_metabolites.values():
-            reaction.add_metabolite(**optional_met_info)
-    return m
+    return m, reactions, nodes
