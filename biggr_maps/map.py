@@ -270,6 +270,8 @@ class Reaction:
             "reversibility": self.reversibility,
             "label_x": self.label_x,
             "label_y": self.label_y,
+            "gene_reaction_rule": "",
+            "genes": [],
             "metabolites": [
                 {"coeficient": coeff, "bigg_id": node.bigg_id}
                 for coeff, node in self.metabolites
